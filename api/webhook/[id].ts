@@ -137,7 +137,11 @@ export default async function webhook(
     })
   }
 
-  const eventId = body.header.event_id
+  if (!body || !body.header) {
+    console.error('Invalid request body structure', body);
+    return response.json({ error: 'invalid payload' });
+  }
+  const eventId = body.header.event_id;
   if (isDuplicateId(eventId)) {
     return response.json({
       retry: true,
