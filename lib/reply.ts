@@ -16,6 +16,9 @@ type GPTModel =
   | 'gpt-4-32k-0314'
   | 'gpt-3.5-turbo'
   | 'gpt-3.5-turbo-0301'
+  | 'gpt-5.4'
+  | 'gpt-5.3'
+  | 'gpt-5.2'
 
 const errorMessages = [
   '抱歉，我没听懂你的意思，你可以再说一遍吗',
