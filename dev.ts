@@ -19,6 +19,7 @@ const server = createServerWithHelpers(async (req, res) => {
   }
 })
 
-server.listen(3000, () => {
-  console.log('Start server at :3000')
+const port = process.env.PORT || 3000;
+server.listen(port, () => {
+  console.log(`Start server at :${port}`)
 })
