@@ -64,7 +64,7 @@ export async function reply(messages: ChatMessage[]): Promise<string> {
   return pRetry(getReply, { times: 5 })
     .catch((e) => {
       // return '抱歉，我发生了一点小意外。'
-      console.error('API调用失败详细信息:', e) // 新增此行以打印真实报错
+      console.error('API调用失败, 状态码:', e.status, '详情:', e.text || e.message)
       return sample(errorMessages)
     })
 }
