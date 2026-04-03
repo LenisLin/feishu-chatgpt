@@ -1,70 +1,82 @@
 import config from '../config'
 import { sample } from 'midash'
-import wretch from 'wretch'
-import { retry } from 'wretch/middlewares/retry'
 import { retry as pRetry } from '@shanyue/promise-utils'
 
-type ChatMessage = {
-  role: 'system' | 'user' | 'assistant'
-  content: string
-}
+type ChatMessage = { role: 'system' | 'user' | 'assistant', content: string }
 
-type GPTModel =
-  | 'gpt-4'
-  | 'gpt-4-0314'
-  | 'gpt-4-32k'
-  | 'gpt-4-32k-0314'
-  | 'gpt-3.5-turbo'
-  | 'gpt-3.5-turbo-0301'
-  | 'gpt-5.4'
-  | 'gpt-5.3'
-  | 'gpt-5.2'
-
-const errorMessages = [
-  '抱歉，我没听懂你的意思，你可以再说一遍吗',
-  '对不起，我没有理解您的意思，请再说一遍。',
-  '抱歉，我不明白您想表达什么，请您提供更多细节。',
-  '不好意思，我需要更多信息来帮助您，您能否再解释一下您的问题？',
-  '我很抱歉，我需要更多上下文来理解您的意思，请您详细说明一下。',
-  '对不起，我听了您的问题，但是不太明白您的意思，您能否用不同的方式解释一下？',
-  '请您再慢慢说一遍，我听不太清楚，不太理解您的意思。',
-  '能否请您再用不同的方式描述一下，我才能更好地理解您所说的内容。',
-  '对不起，可能是我的理解能力有限，能否再解释一下？',
-]
+const errorMessages = ['抱歉，我发生了一点小意外，请稍后再试。']
 
 export async function reply(messages: ChatMessage[]): Promise<string> {
-  const apiKey = sample(config.apiKey)
+  const apiKey = sample(config.apiKey)?.trim() // 确保 key 没有多余空格
+  
+  const payload = {
+    model: config.model || 'gpt-3.5-turbo', 
+    messages: messages,
+    stream: true // 强行开启流式，满足代理商要求
+  }
+  
+  // 核心检测点：只要在 Zeabur 日志看到这段话，证明新代码绝对生效了
+  console.log('\n====== 核心调试日志 ======')
+  console.log('目标URL:', `${config.baseURL}/v1/chat/completions`)
+  console.log('流式状态:', payload.stream)
+  console.log('==========================\n')
 
-  // TODO: wretch retry 中间件无法返回 40x 异常，需修复
-  const w = wretch(config.baseURL).middlewares([
-    // retry({
-    //   delayTimer: 500,
-    //   maxAttempts: 3,
-    //   until (response, error) {
-    //     return response && response.ok
-    //   }
-    // })
-  ])
-  const getReply = () => w
-    .url('/v1/chat/completions')
-    .headers({
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json'
+  const getReply = async () => {
+    const response = await fetch(`${config.baseURL}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(payload)
     })
-    .post({
-      model: config.model,
-      messages
-    })
-    .json((data) => {
-      if (!data.choices.length) {
-        throw new Error('No Content')
+
+    if (!response.ok) {
+      const errText = await response.text()
+      throw new Error(`[HTTP ${response.status}] ${errText}`)
+    }
+
+    const reader = response.body?.getReader()
+    if (!reader) throw new Error('流读取器初始化失败')
+
+    const decoder = new TextDecoder('utf-8')
+    let fullText = ''
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (value) {
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        
+        // 保留未闭合的残缺数据片段，等待下一次循环拼接
+        buffer = lines.pop() || ''
+        
+        for (const line of lines) {
+          const trimmedLine = line.trim()
+          if (!trimmedLine || trimmedLine === 'data: [DONE]') continue
+          
+          if (trimmedLine.startsWith('data: ')) {
+            try {
+              const dataStr = trimmedLine.slice(6)
+              const data = JSON.parse(dataStr)
+              const content = data.choices?.[0]?.delta?.content
+              if (content) fullText += content
+            } catch (e) {
+              // 忽略碎片解析错误，继续处理数据流
+            }
+          }
+        }
       }
-      return data.choices[0].message.content
-    })
-  return pRetry(getReply, { times: 5 })
-    .catch((e) => {
-      // return '抱歉，我发生了一点小意外。'
-      console.error('API调用失败, 状态码:', e.status, '详情:', e.text || e.message)
-      return sample(errorMessages)
-    })
+      if (done) break
+    }
+    
+    if (!fullText) throw new Error('流解析未提取到有效内容')
+    return fullText
+  }
+
+  return pRetry(getReply, { times: 2 }).catch((e: any) => {
+    console.error('API调用彻底失败:', e.message || e)
+    return errorMessages[0]
+  })
 }
