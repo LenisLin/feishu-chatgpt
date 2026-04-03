@@ -19,4 +19,7 @@ export default {
   baseURL: process.env.BASE_URL || 'https://api.openai.com',
   apiKey: (process.env.OPEN_API_KEY ?? '').split(','),
   model: process.env.GPT_MODEL || 'gpt-3.5-turbo',
+  botName: process.env.BOT_NAME,
+  // 新增：你本人的 Open ID
+  userOpenId: process.env.USER_OPEN_ID,
 }
